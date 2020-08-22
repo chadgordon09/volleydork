@@ -1,0 +1,201 @@
+# import tidyverse library like usual
+library(tidyverse)
+
+# when working with lag/lead functions, always double check order of data
+master <- master[order(master$id_master),] 
+
+# create new function to read, if x IS NOT in group y...
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+# create 1st touch quality for input - these are built by looking at rally eff after each contact
+# there was a pocket of positive touches, a cluster around 0, and a pocket of negative touches
+pos_touch <- c("Reception #", "Reception +", "Reception !", "Dig #", "Freeball #", "Freeball +", "Freeball !", "Cover #")
+neutral_touch <- c("Dig +", "Dig !", "Freeball -", "Reception -", "Cover +", "Cover !")
+neg_touch <- c("Dig -", "Freeball /", "Reception /", "Cover -")
+
+# build first touch quality - if contact is pos/neutral/neg, say so as well as the zone of the subsequent touch
+master$first_touch_quality <- NA
+master$first_touch_quality <- ifelse(master$add_cover %in% c("Reception", "Dig", "Freeball", "Cover") & lead(master$team,1)==master$team & lead(master$skill,1)=="Set" &
+                                       master$skq %in% pos_touch, paste0("Good ", master$add_cover, " into ", lead(master$end_zone,1)), master$first_touch_quality)
+master$first_touch_quality <- ifelse(master$add_cover %in% c("Reception", "Dig", "Freeball", "Cover") & lead(master$team,1)==master$team & lead(master$skill,1)!="Set" &
+                                       master$skq %in% pos_touch, paste0("Good ", master$add_cover, " into ", lead(master$start_zone,1)), master$first_touch_quality)
+master$first_touch_quality <- ifelse(master$add_cover %in% c("Reception", "Dig", "Freeball", "Cover") & lead(master$team,1)==master$team & lead(master$skill,1)=="Set" &
+                                       master$skq %in% neutral_touch, paste0("OK ", master$add_cover, " into ", lead(master$end_zone,1)), master$first_touch_quality)
+master$first_touch_quality <- ifelse(master$add_cover %in% c("Reception", "Dig", "Freeball", "Cover") & lead(master$team,1)==master$team & lead(master$skill,1)!="Set" &
+                                       master$skq %in% neutral_touch, paste0("OK ", master$add_cover, " into ", lead(master$start_zone,1)), master$first_touch_quality)
+master$first_touch_quality <- ifelse(master$add_cover %in% c("Reception", "Dig", "Freeball", "Cover") & lead(master$team,1)==master$team & lead(master$skill,1)=="Set" &
+                                       master$skq %in% neg_touch & !is.na(master$one_touch_future), paste0("Poor ", master$add_cover, " into ", lead(master$end_zone,1)), master$first_touch_quality)
+master$first_touch_quality <- ifelse(master$add_cover %in% c("Reception", "Dig", "Freeball", "Cover") & lead(master$team,1)==master$team & lead(master$skill,1)!="Set" &
+                                       master$skq %in% neg_touch & !is.na(master$one_touch_future), paste0("Poor ", master$add_cover, " into ", lead(master$start_zone,1)), master$first_touch_quality)
+master$first_touch_quality <- ifelse(master$add_cover %in% c("Reception", "Dig", "Freeball", "Cover") &
+                                       master$skq %in% neg_touch & !is.na(master$one_touch_future), paste0("Poor ", master$add_cover), master$first_touch_quality)
+master$first_touch_quality <- ifelse(master$add_cover %in% c("Reception", "Dig", "Freeball", "Cover") & lead(master$team,1)!=master$team & lead(master$skill,1)=="Attack" &
+                                       master$skq %!in% c("Reception =", "Dig =", "Freeball =", "Cover ="), "Overpass into Attack", master$first_touch_quality)
+master$first_touch_quality <- ifelse(master$add_cover %in% c("Reception", "Dig", "Freeball", "Cover") & lead(master$team,1)!=master$team & lead(master$skill,1)!="Attack" &
+                                       master$skq %!in% c("Reception =", "Dig =", "Freeball =", "Cover ="), "Overpass into Freeball", master$first_touch_quality)
+master$first_touch_quality <- ifelse(master$skq %in% c("Reception =", "Dig =", "Freeball =", "Cover ="), paste0("Error on ", master$add_cover), master$first_touch_quality)
+
+
+# create the 2nd touch situation labels
+## we've worked backwards here, the output of setting must equal the input of attacking
+master$second_touch_result <- NA
+master$second_touch_result <- ifelse(master$skq=="Set #" & lead(master$skill=="Attack",1), paste0(lag(master$in_or_oos,1), " - ", lead(master$num_players)), master$second_touch_result)
+master$second_touch_result <- ifelse(master$skq=="Set -", "Poor Set", master$second_touch_result)
+master$second_touch_result <- ifelse(master$skq=="Set =", "Ball Handling Error", master$second_touch_result)
+
+# create block touch situation labels - if a cover, add the "time" as well
+master$block_touch_result <- NA
+master$block_touch_result <- ifelse(master$skill == "Block" & lead(master$add_cover!="Cover"), lead(master$first_touch_quality,1), master$block_touch_result)
+master$block_touch_result <- ifelse(master$skill == "Block" & lead(master$add_cover=="Cover"), paste0(lag(master$skill_subtype,1), " + ", ifelse(lead(master$video_time,1) - lag(master$video_time,1) < 2, lead(master$video_time,1) - lag(master$video_time,1),"2"), " sec to Cover"), master$block_touch_result)
+master$block_touch_result <- ifelse(master$skq %in% c("Block =", "Block !"), "Block Tooled", master$block_touch_result)
+master$block_touch_result <- ifelse(master$skq=="Block #", "Stuff Block", master$block_touch_result)
+
+overpass <- c("Reception /", "Dig -", "Cover -", "Freeball /")
+
+######## SIMPLIFY ############
+master$input <- NA
+master$output <- NA
+
+#serve
+master$input <- ifelse(master$skill=="Serve", "Pre-Serve", master$input)
+master$output <- ifelse(master$skill=="Serve", lead(master$first_touch_quality,1), master$output)
+master$output <- ifelse(master$skill=="Serve" & master$skq=="Serve #", "Service Ace", master$output)
+master$output <- ifelse(master$skill=="Serve" & master$skq=="Serve =", "Service Error", master$output)
+
+#reception
+master$input <- ifelse(master$skill=="Reception", "Pre-Serve", master$input)
+master$output <- ifelse(master$skill=="Reception", master$first_touch_quality, master$output)
+master$output <- ifelse(master$skill=="Reception" & master$skq=="Reception =", "Reception Error", master$output)
+
+#set
+master$input <- ifelse(master$skill=="Set", lag(master$output,1), master$input)
+master$output <- ifelse(master$skq=="Set #", master$second_touch_result, master$output)
+master$output <- ifelse(master$skq=="Set -", "Poor Set", master$output)
+master$output  <- ifelse(master$skq=="Set =", "Ball Handling Error", master$output)
+
+#attack
+master$input <- ifelse(master$skill=="Attack", lag(master$second_touch_result,1), master$input)
+master$input <- ifelse(master$skill=="Attack" & master$one_touch_ago %in% overpass, "Overpass", master$input)
+master$output <- ifelse(master$skill=="Attack" & lead(master$add_cover,1)=="Block", lead(master$block_touch_result,1), master$output)
+master$output <- ifelse(master$skill=="Attack" & lead(master$add_cover,1)!="Block", lead(master$first_touch_quality,1), master$output)
+master$output <- ifelse(master$skill=="Attack" & master$skq=="Attack #", "Kill", master$output)
+master$output <- ifelse(master$skill=="Attack" & master$skq=="Attack =", "Attack Error", master$output)
+master$output <- ifelse(master$skill=="Attack" & master$skq=="Attack /", "Attack Blocked", master$output)
+
+#block
+master$input <- ifelse(master$skill=="Block", lag(master$input,1), master$input)
+master$output <- ifelse(master$skill=="Block", lead(master$first_touch_quality,1), master$output)
+master$output <- ifelse(master$skill=="Block" & master$skq=="Block #", "Stuff Block", master$output)
+master$output <- ifelse(master$skill=="Block" & (master$skq=="Block =" | master$skq=="Block !"), "Block Tooled", master$output)
+
+#dig
+master$input <- ifelse(master$add_cover=="Dig" & substr(lag(master$skq,1),1,5)!="Block", lag(master$input,1), master$input)
+master$input <- ifelse(master$add_cover=="Dig" & lag(master$skq,1)=="Block +", paste0("Block Slowdown + ", ifelse(master$video_time - lag(master$video_time,2) < 2, master$video_time - lag(master$video_time,2),"2"), " sec"), master$input)
+master$input <- ifelse(master$add_cover=="Dig" & (master$input=="Block Slowdown + 3 sec" | master$input=="Block Slowdown + 4 sec" | master$input=="Block Slowdown + 5 sec"), "Block Slowdown + 2 sec", master$input)
+master$input <- ifelse(master$add_cover=="Dig" & substr(lag(master$skq,1),1,5)=="Block" & lag(master$skq,1)!="Block +", "Unhelpful Block Touch", master$input)
+master$input <- ifelse(master$add_cover=="Dig" & lag(master$skq) %in% c("Block =", "Block !"), "Block Tooled", master$input)
+master$output <- ifelse(master$add_cover=="Dig", master$first_touch_quality, master$output)
+master$output <- ifelse(master$add_cover=="Dig" & master$skq=="Dig =", "Dig Error", master$output)
+
+#cover
+master$input <- ifelse(master$add_cover=="Cover", lag(master$block_touch_result,1), master$input)
+master$output <- ifelse(master$add_cover=="Cover", master$first_touch_quality, master$output)
+
+#freeball
+master$input <- ifelse(master$skill=="Freeball", "Freeball Baseline", master$input)
+master$output <- ifelse(master$skill=="Freeball", master$first_touch_quality, master$output)
+master$output <- ifelse(master$skill=="Freeball" & master$skq=="Freeball =", "Freeball Error", master$output)
+
+
+#create input efficiencies
+ie_serve <- aggregate(rally_eff ~ add_cover*input, subset(master, add_cover=="Serve"), mean)
+colnames(ie_serve)[3] <- "input_eV"
+
+ie_reception <- ie_serve
+ie_reception$input_eV <- ie_reception$input_eV * -1
+ie_reception$add_cover <- "Reception"
+
+ie_set <- aggregate(rally_eff ~ add_cover*input, subset(master, add_cover=="Set"), mean)
+colnames(ie_set)[3] <- "input_eV"
+
+ie_attack <- aggregate(rally_eff ~ add_cover*input, subset(master, add_cover=="Attack"), mean)
+colnames(ie_attack)[3] <- "input_eV"
+
+ie_block <- ie_attack
+ie_block$input_eV <- ie_block$input_eV * -1
+ie_block$add_cover <- "Block"
+
+a <- aggregate(rally_eff ~ add_cover*input, subset(master, add_cover=="Dig" & substr(one_touch_ago, 1,5)=="Block"), mean)
+colnames(a)[3] <- "input_eV"
+b <- ie_attack
+b$input_eV <- b$input_eV * -1
+b$add_cover <- "Dig"
+ie_dig <- rbind(a,b)
+
+ie_cover <- aggregate(rally_eff ~ add_cover*input, subset(master, add_cover=="Cover"), mean)
+colnames(ie_cover)[3] <- "input_eV"
+
+ie_freeball <- aggregate(rally_eff ~ add_cover*input, subset(master, add_cover=="Freeball"), mean)
+colnames(ie_freeball)[3] <- "input_eV"
+
+ie_all <- rbind(ie_serve,ie_reception,ie_set,ie_attack,ie_block,ie_dig,ie_freeball,ie_cover)
+
+
+#create output efficiencies
+oe_serve <- aggregate(rally_eff ~ add_cover*output, subset(master, add_cover=="Serve"), mean)
+colnames(oe_serve)[3] <- "output_eV"
+
+oe_reception <- oe_serve
+oe_reception$output_eV <- oe_reception$output_eV * -1
+oe_reception$output <- ifelse(oe_reception$output=="Service Ace", "Reception Error", oe_reception$output)
+oe_reception$add_cover <- "Reception"
+
+oe_set <- aggregate(rally_eff ~ add_cover*output, subset(master, add_cover=="Set"), mean)
+colnames(oe_set)[3] <- "output_eV"
+
+oe_attack <- aggregate(rally_eff ~ add_cover*output, subset(master, add_cover=="Attack"), mean)
+colnames(oe_attack)[3] <- "output_eV"
+oe_attack$output_eV <- ifelse(oe_attack$output %in% c("Attack Blocked", "Attack Error"), -1, oe_attack$output_eV)
+oe_attack$output_eV <- ifelse(oe_attack$output=="Kill", 1, oe_attack$output_eV)
+
+
+oe_block <- aggregate(rally_eff ~ add_cover*output, subset(master, add_cover=="Block"), mean)
+colnames(oe_block)[3] <- "output_eV"
+oe_block$output_eV <- ifelse(oe_block$output=="Stuff Block", 1, oe_block$output_eV)
+
+
+oe_dig <- aggregate(rally_eff ~ add_cover*output, subset(master, add_cover=="Dig"), mean)
+colnames(oe_dig)[3] <- "output_eV"
+oe_dig$output_eV <- ifelse(oe_dig$output=="Dig Error", -1, oe_dig$output_eV)
+
+
+oe_cover <- aggregate(rally_eff ~ add_cover*output, subset(master, add_cover=="Cover"), mean)
+colnames(oe_cover)[3] <- "output_eV"
+
+oe_freeball <- aggregate(rally_eff ~ add_cover*output, subset(master, add_cover=="Freeball"), mean)
+colnames(oe_freeball)[3] <- "output_eV"
+
+oe_all <- rbind(oe_serve,oe_reception,oe_set,oe_attack,oe_block,oe_dig,oe_freeball,oe_cover)
+
+allskill <- merge(ie_all, oe_all, by="add_cover")
+
+# get rid of these columns if I have already added them to the master dataframe, otherwise merge won't work
+master$eV_added <- NULL
+master$input_eV <- NULL
+master$output_eV <- NULL
+
+# merge by skill (add_cover), input situation, and output situation
+master <- merge(master, allskill, by=c("add_cover", "input", "output"), all.x = TRUE)
+
+# always reorder after merge
+master <- master[order(master$id_master),] 
+
+# if an input didn't match, call it "unsure" for those outliers / weird situations
+## and give them an eV of 0, because we just don't know...
+master$input <- ifelse(is.na(master$input), "unsure", master$input)
+master$output <- ifelse(is.na(master$output), "unsure", master$output)
+master$input_eV <- ifelse(is.na(master$input_eV), 0, master$input_eV)
+master$output_eV <- ifelse(is.na(master$output_eV), 0, master$output_eV)
+
+# eV added is just output minus input 
+master$eV_added <- master$output_eV-master$input_eV
