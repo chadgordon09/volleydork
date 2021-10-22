@@ -24,7 +24,7 @@ print(q)
 master <- subset(all_files, substring(code, 2, 2)!="P" & substring(code, 2, 2)!="p" 
                  & substring(code, 2, 2)!="z" & substring(code, 2, 2)!="c"
                  & substring(code, 2, 2)!="*" & substring(code, 2, 2)!="$")
-master <- master[,c(1,2,4,6,8,10,11,12,13,14,19,20,21,23,24,54,55,56,57,58,59,72,73,74,75,79,80,81,82,83)]
+#master <- master[,c(1,2,4,6,8,10,11,12,13,14,19,20,21,23,24,54,55,56,57,58,59,72,73,74,75,79,80,81,82,83)]
 all_files <- NULL
 
 #create touch_id for all rows - helps w/ ability to reorder properly if I screw something up down the road
