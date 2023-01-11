@@ -13,7 +13,7 @@ my.files <- list.files(pattern = "*dvw")
 all_files <- as.data.frame(matrix(ncol=0,nrow=0))
 
 #run read_dv code for all files in my.files - rbind them into "all_files"
-for(q in 1:1500) {
+for(q in 1:length(my.files)) {
 x <- read_dv(my.files[q], skill_evaluation_decode = "volleymetrics")
 x$plays$match_date <- x$meta$match$date
 all_files <- rbind(all_files, x$plays)
